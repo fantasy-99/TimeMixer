@@ -58,14 +58,17 @@ class MultiScaleSeasonMixing(nn.Module):
         out_low = season_list[1]
         out_season_list = [out_high.permute(0, 2, 1)]
 
+        # 加入len=4， 那么实际遍历i=0，1，2
         for i in range(len(season_list) - 1):
             out_low_res = self.down_sampling_layers[i](out_high)
             out_low = out_low + out_low_res
             out_high = out_low
+            # 那么实际这里这个判断没什么用，因为i=2就结束了，之后也用不到outlow
             if i + 2 <= len(season_list) - 1:
                 out_low = season_list[i + 2]
             out_season_list.append(out_high.permute(0, 2, 1))
 
+        # 第二维是T
         return out_season_list
 
 
@@ -153,6 +156,7 @@ class PastDecomposableMixing(nn.Module):
 
     def forward(self, x_list):
         length_list = []
+        # 第二维还是T
         for x in x_list:
             _, T, _ = x.size()
             length_list.append(T)
@@ -165,6 +169,7 @@ class PastDecomposableMixing(nn.Module):
             if self.channel_independence == 0:
                 season = self.cross_layer(season)
                 trend = self.cross_layer(trend)
+            # 此时第三维是T
             season_list.append(season.permute(0, 2, 1))
             trend_list.append(trend.permute(0, 2, 1))
 
@@ -176,6 +181,7 @@ class PastDecomposableMixing(nn.Module):
         out_list = []
         for ori, out_season, out_trend, length in zip(x_list, out_season_list, out_trend_list,
                                                       length_list):
+            # length实际上没变吧？虽然是取了length，但是其实还是整个序列。当然，这是针对通道独立的情况，不独立的情况不太清楚
             out = out_season + out_trend
             if self.channel_independence:
                 out = ori + self.out_cross_layer(out)
@@ -294,7 +300,8 @@ class Model(nn.Module):
 
         x_enc_sampling_list = []
         x_mark_sampling_list = []
-        x_enc_sampling_list.append(x_enc.permute(0, 2, 1))
+        # 下采样
+        x_enc_sampling_list.append(x_enc.permute(0, 2, 1))      # B C T -> B T C
         x_mark_sampling_list.append(x_mark_enc)
 
         for i in range(self.configs.down_sampling_layers):
@@ -334,6 +341,7 @@ class Model(nn.Module):
                 B, T, N = x.size()
                 x = self.normalize_layers[i](x, 'norm')
                 if self.channel_independence == 1:
+                    # x: B T N
                     x = x.permute(0, 2, 1).contiguous().reshape(B * N, T, 1)
                     x_mark = x_mark.repeat(N, 1, 1)
                 x_list.append(x)
@@ -348,7 +356,7 @@ class Model(nn.Module):
 
         # embedding
         enc_out_list = []
-        x_list = self.pre_enc(x_list)
+        x_list = self.pre_enc(x_list) # 这里xlist是一个元组
         if x_mark_enc is not None:
             for i, x, x_mark in zip(range(len(x_list[0])), x_list[0], x_mark_list):
                 enc_out = self.enc_embedding(x, x_mark)  # [B,T,C]
@@ -356,8 +364,9 @@ class Model(nn.Module):
         else:
             for i, x in zip(range(len(x_list[0])), x_list[0]):
                 enc_out = self.enc_embedding(x, None)  # [B,T,C]
+                # 其实应该是 B*N T d_model ?
                 enc_out_list.append(enc_out)
-
+        # layer是网络的深度，和down_sampling_layers区别开
         # Past Decomposable Mixing as encoder for past
         for i in range(self.layer):
             enc_out_list = self.pdm_blocks[i](enc_out_list)
@@ -366,6 +375,7 @@ class Model(nn.Module):
         dec_out_list = self.future_multi_mixing(B, enc_out_list, x_list)
 
         dec_out = torch.stack(dec_out_list, dim=-1).sum(-1)
+        # print(dec_out.shape)
         dec_out = self.normalize_layers[0](dec_out, 'denorm')
         return dec_out
 
@@ -381,7 +391,9 @@ class Model(nn.Module):
                     dec_out = self.projection_layer(dec_out)
                 else:
                     dec_out = self.projection_layer(dec_out)
+                # 服了，这个c_out是和数据集对应的，怪不得输出这个，何必定义个超参呢？？
                 dec_out = dec_out.reshape(B, self.configs.c_out, self.pred_len).permute(0, 2, 1).contiguous()
+                # print(dec_out.shape)
                 dec_out_list.append(dec_out)
 
         else:

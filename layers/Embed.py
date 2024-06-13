@@ -169,12 +169,15 @@ class DataEmbedding_wo_pos(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, x, x_mark):
+        # 每个序列是： B*N T 1
         if x is None and x_mark is not None:
             return self.temporal_embedding(x_mark)
         if x_mark is None:
             x = self.value_embedding(x)
         else:
             x = self.value_embedding(x) + self.temporal_embedding(x_mark)
+        # 输出是： B*N T d_model
+        # 由于通道独立，所以cin=1
         return self.dropout(x)
 
 
